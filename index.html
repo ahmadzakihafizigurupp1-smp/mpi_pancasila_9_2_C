@@ -205,11 +205,11 @@
 
     <!-- MODUL 6: UJI PEMAHAMAN -->
     <section class="module max-w-[1180px] mx-auto" data-module="5">
-      <div class="mb-5"><div class="eyebrow">Asesmen formatif</div><h1 class="section-title text-2xl sm:text-3xl mt-1">Uji Pemahaman</h1><p class="text-sm text-slate-600 mt-2">Pilih satu jawaban untuk setiap soal. Umpan balik dan nilai sementara akan diperbarui secara otomatis.</p></div>
+      <div class="mb-5"><div class="eyebrow">Asesmen formatif</div><h1 class="section-title text-2xl sm:text-3xl mt-1">Uji Pemahaman</h1><p class="text-sm text-slate-600 mt-2">Pilih satu jawaban untuk setiap soal. Nilai akhir hanya ditampilkan setelah kamu mengirim jawaban.</p></div>
       <div class="sticky-score mb-5">
         <div class="grid sm:grid-cols-[1fr_auto] items-center gap-4">
-          <div><div class="flex justify-between items-center gap-3"><span class="text-xs text-slate-500 font-bold">NILAI SEMENTARA</span><span id="answeredText" class="text-xs text-slate-500">0 dari 10 terjawab</span></div><div class="flex items-end gap-2 mt-1"><span id="scoreValue" class="text-3xl font-extrabold text-blue-800 tabular-nums">0</span><span class="text-sm text-slate-500 mb-1">/ 100</span></div><div class="progress-track mt-2"><div id="scoreProgress" class="progress-fill"></div></div></div>
-          <div class="sm:text-right"><div id="scoreStatus" class="font-extrabold text-sm">Ayo mulai berlatih!</div><div class="text-xs text-slate-500 mt-1">10 soal × 10 poin</div></div>
+          <div><div class="flex justify-between items-center gap-3"><span class="text-xs text-slate-500 font-bold">NILAI AKHIR</span><span id="answeredText" class="text-xs text-slate-500">0 dari 10 terjawab</span></div><div class="flex items-end gap-2 mt-1"><span id="scoreValue" class="text-3xl font-extrabold text-blue-800 tabular-nums">—</span><span class="text-sm text-slate-500 mb-1">/ 100</span></div><div class="progress-track mt-2"><div id="scoreProgress" class="progress-fill"></div></div></div>
+          <div class="sm:text-right"><div id="scoreStatus" class="font-extrabold text-sm">Nilai tampil setelah jawaban dikirim.</div><div class="text-xs text-slate-500 mt-1">10 soal × 10 poin</div></div>
         </div>
       </div>
       <div class="panel p-5 sm:p-6 mb-5"><h2 class="font-extrabold text-blue-950"><i class="fa-solid fa-user-pen text-blue-600 mr-2"></i>Identitas peserta</h2><div class="grid sm:grid-cols-3 gap-3 mt-4"><div><label for="studentName" class="text-xs font-bold text-slate-600">Nama lengkap</label><input id="studentName" class="field mt-1" maxlength="100" placeholder="Nama siswa" required /></div><div><label for="studentClass" class="text-xs font-bold text-slate-600">Kelas</label><input id="studentClass" class="field mt-1" maxlength="30" placeholder="IX A / IX B" required /></div><div><label for="assessmentDate" class="text-xs font-bold text-slate-600">Tanggal</label><input id="assessmentDate" class="field mt-1" type="date" required /></div></div></div>
@@ -245,6 +245,9 @@
     // Gunakan Find (Ctrl+F): "gantikan dengan URL APP WEB"
     // ============================================================
     const APP_WEB_URL = "https://script.google.com/macros/s/AKfycbxYF5BDt_OnsLz0ZwbW_vpp-LzYFBqk2NmkLr2TiHUcKSBYkn3Z5lMxsemP3Z7RDqBB/exec"; // gantikan dengan URL APP WEB
+    let activeAppWebUrl = APP_WEB_URL;
+    let quizSubmitted = false;
+    let sendDispatched = false;
 
     const flashcardData = [
       {q:"Apa yang dimaksud hak warga negara?",a:"Sesuatu yang patut diterima/dimiliki warga negara dan dilindungi oleh ketentuan hukum."},
@@ -320,54 +323,120 @@
       updateScore();
     }
     function pickAnswer(index,value){
+      if(quizSubmitted) return;
       answers[index]=value;
-      const card=document.getElementById(`question-${index}`);const feedback=document.getElementById(`feedback-${index}`);
-      card.querySelectorAll('.option').forEach((el,j)=>{el.classList.remove('correct','wrong');if(j===questions[index].answer)el.classList.add('correct');if(j===value&&value!==questions[index].answer)el.classList.add('wrong');});
-      const correct=value===questions[index].answer;
-      feedback.className=`feedback ${correct?'good':'bad'}`;
-      feedback.innerHTML=`<i class="fa-solid ${correct?'fa-circle-check':'fa-circle-xmark'} mr-1"></i>${correct?'Benar! ':'Belum tepat. '}${questions[index].why}`;
+      // Simpan pilihan saja; jangan memberi tanda benar/salah atau membuka pembahasan.
+      const card=document.getElementById(`question-${index}`);
+      card.querySelectorAll('.option').forEach(el=>el.classList.remove('correct','wrong'));
+      const feedback=document.getElementById(`feedback-${index}`);
+      feedback.textContent='';
       updateScore();
     }
     function calculateScore(){return questions.reduce((sum,q,i)=>sum+(answers[i]===q.answer?10:0),0);}
     function updateScore(){
-      const score=calculateScore(),answered=Object.keys(answers).length;
-      document.getElementById('scoreValue').textContent=score;
+      const answered=Object.keys(answers).length;
       document.getElementById('answeredText').textContent=`${answered} dari ${questions.length} terjawab`;
-      document.getElementById('scoreProgress').style.width=`${score}%`;
       const status=document.getElementById('scoreStatus');
-      if(answered===0){status.textContent='Ayo mulai berlatih!';status.className='font-extrabold text-sm text-slate-600';}
-      else if(answered<questions.length){status.textContent='Teruskan, tinggal beberapa soal.';status.className='font-extrabold text-sm text-blue-700';}
-      else if(score>=80){status.textContent='Hebat! Pemahamanmu sangat baik.';status.className='font-extrabold text-sm text-emerald-700';}
-      else if(score>=60){status.textContent='Bagus, tinjau kembali jawaban yang keliru.';status.className='font-extrabold text-sm text-amber-700';}
-      else{status.textContent='Ulangi materi dan coba kembali.';status.className='font-extrabold text-sm text-rose-700';}
+      const value=document.getElementById('scoreValue');
+      const progress=document.getElementById('scoreProgress');
+      if(!quizSubmitted){
+        value.textContent='—';
+        progress.style.width='0%';
+        status.textContent=answered===questions.length?'Semua soal terjawab. Kirim jawaban untuk melihat nilai.':'Nilai tampil setelah jawaban dikirim.';
+        status.className='font-extrabold text-sm text-slate-600';
+        return;
+      }
+      const score=calculateScore();
+      value.textContent=score;
+      progress.style.width=`${score}%`;
+      if(score>=80){status.textContent='Sangat baik!';status.className='font-extrabold text-sm text-emerald-700';}
+      else if(score>=60){status.textContent='Hasil baik. Terus tingkatkan pemahamanmu.';status.className='font-extrabold text-sm text-amber-700';}
+      else{status.textContent='Terus belajar dan pahami kembali materi.';status.className='font-extrabold text-sm text-rose-700';}
+    }
+    function setQuizLocked(locked){
+      document.querySelectorAll('#questionsContainer input[type="radio"]').forEach(input=>{input.disabled=locked;});
     }
     function resetQuiz(){
       Object.keys(answers).forEach(k=>delete answers[k]);
-      renderQuestions();document.getElementById('submitStatus').textContent='';document.getElementById('submitStatus').className='text-sm mt-3 font-semibold';
-      document.getElementById('submitScoreBtn').disabled=false;
+      quizSubmitted=false;
+      sendDispatched=false;
+      renderQuestions();
+      setQuizLocked(false);
+      document.getElementById('submitStatus').textContent='';
+      document.getElementById('submitStatus').className='text-sm mt-3 font-semibold';
+      const btn=document.getElementById('submitScoreBtn');
+      btn.disabled=false;
+      btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim nilai';
       mainScroll.scrollTo({top:0,behavior:'smooth'});
+    }
+    function getWebAppUrl(){
+      let endpoint=String(activeAppWebUrl||'').trim();
+      if(!endpoint||endpoint.includes('GANTIKAN DENGAN URL')){
+        endpoint=(prompt('Masukkan URL deployment Google Apps Script Web App (biasanya berakhiran /exec):','')||'').trim();
+      }
+      if(!endpoint) return '';
+      try{
+        const parsed=new URL(endpoint);
+        if(parsed.protocol!=='https:'||parsed.hostname!=='script.google.com'||!/^\/macros\/s\/[^/]+\/(exec|dev)\/?$/.test(parsed.pathname)){
+          throw new Error('URL harus berupa URL Web App Google Apps Script, misalnya https://script.google.com/macros/s/DEPLOYMENT_ID/exec.');
+        }
+      }catch(err){throw new Error(err.message==='Invalid URL'?'URL tidak valid. Masukkan URL Web App Google Apps Script yang berakhiran /exec.':err.message);}
+      activeAppWebUrl=endpoint;
+      return endpoint;
     }
     async function submitScore(){
       const status=document.getElementById('submitStatus');
+      const btn=document.getElementById('submitScoreBtn');
+      if(sendDispatched){
+        status.textContent='Permintaan pengiriman sudah dikirim. Periksa Google Sheets untuk memastikan data tercatat.';
+        status.className='text-sm mt-3 font-bold text-emerald-700';
+        return;
+      }
       const name=document.getElementById('studentName').value.trim();
       const kelas=document.getElementById('studentClass').value.trim();
       const tanggal=document.getElementById('assessmentDate').value;
       if(!name||!kelas||!tanggal){status.textContent='Lengkapi nama, kelas, dan tanggal terlebih dahulu.';status.className='text-sm mt-3 font-bold text-rose-700';return;}
-      if(Object.keys(answers).length!==questions.length){status.textContent='Jawab semua 10 soal sebelum mengirim nilai.';status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
-      if(!APP_WEB_URL||APP_WEB_URL.includes('GANTIKAN DENGAN URL')){status.textContent='URL Google Apps Script belum dipasang. Buka kode HTML dan ganti teks “gantikan dengan URL APP WEB” dengan URL Web App Anda.';status.className='text-sm mt-3 font-bold text-amber-700';return;}
+      if(Object.keys(answers).length!==questions.length){status.textContent='Jawab semua 10 soal sebelum mengirim jawaban.';status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
+
+      // Baru setelah tombol kirim ditekan dan formulir lengkap, tampilkan nilai akhir.
+      quizSubmitted=true;
+      setQuizLocked(true);
+      updateScore();
       const skor=calculateScore();
       const rincianJawaban=questions.map((q,i)=>({nomor:i+1,soal:q.q,jawabanDipilih:q.options[answers[i]],jawabanBenar:q.options[q.answer],benar:answers[i]===q.answer,poin:answers[i]===q.answer?10:0}));
       const payload={nama,kelas,tanggal,skor,keterangan:skor>=80?'Sangat Baik':skor>=60?'Baik':'Perlu penguatan',rincianJawaban,debugData:{sumber:'MPI Pendidikan Pancasila IX - Bab 2 Subbab C',waktuClient:new Date().toISOString(),userAgent:navigator.userAgent,answers}};
-      const btn=document.getElementById('submitScoreBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Mengirim…';
+
+      let endpoint='';
       try{
-        // Content-Type text/plain menjaga permintaan sebagai simple request lintas origin.
-        // mode no-cors membuat respons tidak dapat dibaca browser; verifikasi di spreadsheet.
-        await fetch(APP_WEB_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
-        status.textContent='Permintaan pengiriman telah dikirim. Karena browser menyembunyikan respons no-cors, periksa Google Sheets untuk memastikan baris masuk.';
-        status.className='text-sm mt-3 font-bold text-emerald-700';
+        endpoint=getWebAppUrl();
       }catch(err){
-        status.textContent=`Pengiriman gagal dari browser: ${err.message}. Periksa URL deployment dan koneksi internet.`;status.className='text-sm mt-3 font-bold text-rose-700';
-      }finally{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim nilai';}
+        status.textContent=`Nilai akhir sudah dihitung, tetapi belum dikirim. ${err.message}`;
+        status.className='text-sm mt-3 font-bold text-rose-700';
+        return;
+      }
+      if(!endpoint){
+        status.textContent='Nilai akhir sudah dihitung, tetapi belum tersimpan. Klik Kirim nilai lagi lalu masukkan URL Web App Google Apps Script.';
+        status.className='text-sm mt-3 font-bold text-amber-700';
+        return;
+      }
+
+      btn.disabled=true;
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Mengirim…';
+      status.textContent='Mengirim hasil asesmen ke Google Sheets…';
+      status.className='text-sm mt-3 font-semibold text-blue-700';
+      try{
+        // text/plain + no-cors mengirim simple request ke Apps Script tanpa preflight CORS.
+        await fetch(endpoint,{method:'POST',mode:'no-cors',redirect:'follow',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify(payload),keepalive:true});
+        sendDispatched=true;
+        status.textContent='Permintaan pengiriman telah dikirim. Browser tidak dapat membaca konfirmasi dari mode no-cors; periksa Google Sheets untuk memastikan baris masuk.';
+        status.className='text-sm mt-3 font-bold text-emerald-700';
+        btn.innerHTML='<i class="fa-solid fa-check"></i> Permintaan terkirim';
+      }catch(err){
+        status.textContent=`Nilai akhir tetap ditampilkan, tetapi pengiriman gagal: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba kirim kembali.`;
+        status.className='text-sm mt-3 font-bold text-rose-700';
+        btn.disabled=false;
+        btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Coba kirim lagi';
+      }
     }
     function saveDutyPlan(){const duty=document.getElementById('dutySelect').value,plan=document.getElementById('dutyPlan').value.trim();const out=document.getElementById('dutySaved');if(!duty||!plan){out.textContent='Pilih kewajiban dan tulis langkah tindakan terlebih dahulu.';out.className='text-xs text-rose-700 font-bold mt-2';return;}out.textContent='Refleksi tersimpan sementara pada halaman ini.';out.className='text-xs text-emerald-700 font-bold mt-2';}
     function saveReflections(){const vals=['reflection1','reflection2','reflection3'].map(id=>document.getElementById(id).value.trim());const out=document.getElementById('reflectionSaved');if(vals.every(v=>!v)){out.textContent='Isi setidaknya satu bagian refleksi.';out.className='text-xs text-rose-700 font-bold mt-2';return;}out.textContent='Refleksi tersimpan sementara pada halaman ini. Catatan ini tidak dikirim ke Google Sheets.';out.className='text-xs text-emerald-700 font-bold mt-2';}
