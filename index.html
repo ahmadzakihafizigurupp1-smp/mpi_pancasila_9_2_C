@@ -421,6 +421,64 @@
       }
     }
 
+    function waitForSubmissionStatus(endpoint, submissionId, timeoutMs=30000){
+      return new Promise((resolve,reject)=>{
+        const startedAt=Date.now();
+        let finished=false;
+        let lastLoadError='';
+        function finish(err,result){
+          if(finished) return;
+          finished=true;
+          if(err) reject(err); else resolve(result);
+        }
+        function poll(){
+          if(finished) return;
+          if(Date.now()-startedAt>timeoutMs){
+            finish(new Error('Belum menerima konfirmasi dari Apps Script setelah 30 detik. Periksa tab Google Sheets; jika belum ada baris baru, deploy ulang Code.gs versi terbaru dan coba lagi.' + (lastLoadError?' Detail koneksi: '+lastLoadError:'')));
+            return;
+          }
+          const callbackName='mpiStatusCb_'+Date.now()+'_'+Math.random().toString(36).slice(2,9).replace(/[^a-z0-9]/gi,'');
+          const script=document.createElement('script');
+          let callbackCalled=false;
+          const cleanup=()=>{
+            script.remove();
+            try{delete window[callbackName];}catch(e){window[callbackName]=undefined;}
+          };
+          window[callbackName]=(result)=>{
+            callbackCalled=true;
+            cleanup();
+            if(result && result.status==='success'){
+              finish(null,result);
+            }else if(result && result.status==='error'){
+              finish(new Error(result.message || 'Apps Script gagal menyimpan hasil asesmen.'),result);
+            }else{
+              setTimeout(poll,900);
+            }
+          };
+          script.async=true;
+          script.src=endpoint+(endpoint.includes('?')?'&':'?')
+            +'checkSubmission='+encodeURIComponent(submissionId)
+            +'&callback='+encodeURIComponent(callbackName)
+            +'&_='+Date.now();
+          script.onerror=()=>{
+            cleanup();
+            lastLoadError='Gagal membaca status JSONP dari Web App.';
+            setTimeout(poll,1200);
+          };
+          document.head.appendChild(script);
+          // Jika script terunduh tetapi callback tidak dipanggil (mis. output bukan JavaScript), coba lagi.
+          setTimeout(()=>{
+            if(!finished && !callbackCalled && document.contains(script)){
+              cleanup();
+              lastLoadError='Respons endpoint status bukan JavaScript yang dapat dijalankan.';
+              setTimeout(poll,900);
+            }
+          },2500);
+        }
+        poll();
+      });
+    }
+
     async function submitScore(){
       const status=document.getElementById('submitStatus');
       const btn=document.getElementById('submitScoreBtn');
@@ -428,70 +486,48 @@
       const kelas=document.getElementById('studentClass').value.trim();
       const tanggal=document.getElementById('assessmentDate').value;
       if(!name||!kelas||!tanggal){status.textContent='Lengkapi nama, kelas, dan tanggal terlebih dahulu.';status.className='text-sm mt-3 font-bold text-rose-700';return;}
-      if(Object.keys(answers).length!==questions.length){status.textContent='Jawab semua 10 soal sebelum mengirim jawaban.';status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
+      if(Object.keys(answers).length!==questions.length){status.textContent=`Jawab semua ${questions.length} soal sebelum mengirim jawaban.`;status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
 
-      // Siapkan tab respons sebelum prompt URL berjalan agar browser tidak memblokir POST.
-      // Jika popup diblokir, fallback ke tab aplikasi saat ini sehingga respons server tetap terlihat.
-      const resultTargetName='mpiHasilAsesmen_'+Date.now();
-      let resultWindow=null;
-      let resultTarget='_self';
-      try{
-        resultWindow=window.open('about:blank',resultTargetName);
-        if(resultWindow){
-          resultTarget=resultTargetName;
-          try{
-            resultWindow.document.open();
-            resultWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Mengirim hasil asesmen</title></head><body style="font-family:system-ui,sans-serif;padding:32px;color:#1e3a8a"><h2>Mengirim hasil asesmen…</h2><p>Halaman ini akan menampilkan respons Google Apps Script. Tunggu hingga status success atau error muncul.</p></body></html>');
-            resultWindow.document.close();
-          }catch(windowWriteError){}
-        }
-      }catch(popupError){}
+      let endpoint='';
+      try{endpoint=getWebAppUrl();}
+      catch(err){status.textContent='Nilai belum dikirim. '+err.message;status.className='text-sm mt-3 font-bold text-rose-700';return;}
+      if(!endpoint){status.textContent='Nilai belum dikirim. Masukkan URL Web App Google Apps Script yang berakhiran /exec.';status.className='text-sm mt-3 font-bold text-amber-700';return;}
 
-      // Nilai hanya tampil setelah siswa menekan tombol kirim.
+      const skor=calculateScore();
+      const submissionId='mpi_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+      const rincianJawaban=questions.map((q,i)=>({nomor:i+1,soal:q.q,jawabanDipilih:q.options[answers[i]],jawabanBenar:q.options[q.answer],benar:answers[i]===q.answer,poin:answers[i]===q.answer?10:0}));
+      const payload={submissionId,nama:name,kelas,tanggal,skor,keterangan:skor>=80?'Sangat Baik':skor>=60?'Baik':'Perlu penguatan',rincianJawaban,debugData:{sumber:'MPI Pendidikan Pancasila IX - Bab 2 Subbab C',waktuClient:new Date().toISOString(),userAgent:navigator.userAgent,answers,submissionId}};
+
+      // Skor baru ditampilkan ketika tombol kirim ditekan; jawaban tetap tidak diberi tanda benar/salah.
       quizSubmitted=true;
       setQuizLocked(true);
       updateScore();
-      const skor=calculateScore();
-      const rincianJawaban=questions.map((q,i)=>({nomor:i+1,soal:q.q,jawabanDipilih:q.options[answers[i]],jawabanBenar:q.options[q.answer],benar:answers[i]===q.answer,poin:answers[i]===q.answer?10:0}));
-      const payload={nama,kelas,tanggal,skor,keterangan:skor>=80?'Sangat Baik':skor>=60?'Baik':'Perlu penguatan',rincianJawaban,debugData:{sumber:'MPI Pendidikan Pancasila IX - Bab 2 Subbab C',waktuClient:new Date().toISOString(),userAgent:navigator.userAgent,answers}};
-
-      let endpoint='';
-      try{
-        endpoint=getWebAppUrl();
-      }catch(err){
-        if(resultWindow && !resultWindow.closed) resultWindow.close();
-        status.textContent=`Nilai sudah dihitung, tetapi belum dikirim. ${err.message}`;
-        status.className='text-sm mt-3 font-bold text-rose-700';
-        btn.disabled=false;
-        return;
-      }
-      if(!endpoint){
-        if(resultWindow && !resultWindow.closed) resultWindow.close();
-        status.textContent='Nilai sudah dihitung, tetapi belum dikirim. Masukkan URL Web App Google Apps Script yang berakhiran /exec.';
-        status.className='text-sm mt-3 font-bold text-amber-700';
-        btn.disabled=false;
-        return;
-      }
-
       btn.disabled=true;
-      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Mengirim…';
-      status.textContent='Mengirim formulir hasil asesmen ke Google Apps Script…';
-      status.className='text-sm mt-3 font-semibold text-blue-700';
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Mengirim dan memverifikasi…';
+      status.textContent='Mengirim hasil asesmen dan menunggu konfirmasi penyimpanan Google Sheets…';
+      status.className='text-sm mt-3 font-bold text-blue-700';
+
+      // POST sebagai text/plain sederhana agar tidak memicu preflight CORS.
+      // Status akhir diverifikasi melalui endpoint JSONP doGet, bukan dengan menganggap fetch berhasil.
+      let sendError=null;
       try{
-        submitPayloadThroughForm(endpoint,payload,resultTarget);
-        sendDispatched=true;
-        const healthUrl=endpoint+(endpoint.includes('?')?'&':'?')+'health=1';
-        const testWriteUrl=endpoint+(endpoint.includes('?')?'&':'?')+'testwrite=1';
-        status.innerHTML=(resultTarget==='_self'
-          ? 'Browser memblokir tab baru, jadi respons server akan ditampilkan pada halaman ini. Pastikan respons memuat <code>"status":"success"</code>. '
-          : 'Permintaan dikirim. Lihat tab respons yang baru dibuka dan pastikan respons memuat <code>"status":"success"</code>. ')
-          +'Jika muncul <code>"status":"error"</code>, gunakan pesan error pada respons tersebut. <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">Uji penulisan ke sheet</a> · <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">Periksa koneksi</a>.';
-        status.className='text-sm mt-3 font-bold text-blue-700';
-        btn.disabled=false;
-        btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim ulang nilai';
+        const sendPromise=fetch(endpoint,{
+          method:'POST',
+          mode:'no-cors',
+          cache:'no-store',
+          redirect:'follow',
+          headers:{'Content-Type':'text/plain;charset=UTF-8'},
+          body:JSON.stringify(payload)
+        }).catch(err=>{sendError=err;});
+
+        const result=await waitForSubmissionStatus(endpoint,submissionId,30000);
+        await sendPromise;
+        status.textContent=`Berhasil! Nilai ${skor}/100 tersimpan pada sheet "${result.sheetName || 'Nilai Siswa'}", baris ${result.row || '-'}.`;
+        status.className='text-sm mt-3 font-extrabold text-emerald-700';
+        btn.disabled=true;
+        btn.innerHTML='<i class="fa-solid fa-check"></i> Nilai tersimpan';
       }catch(err){
-        if(resultWindow && !resultWindow.closed) resultWindow.close();
-        status.textContent=`Pengiriman gagal dimulai: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba lagi.`;
+        status.textContent='Belum dapat memastikan nilai tersimpan. '+(err && err.message ? err.message : String(err))+(sendError?' Penyebab pengiriman: '+sendError.message:'');
         status.className='text-sm mt-3 font-bold text-rose-700';
         btn.disabled=false;
         btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Coba kirim lagi';
