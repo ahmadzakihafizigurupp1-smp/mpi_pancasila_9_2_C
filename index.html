@@ -246,9 +246,10 @@
     // ============================================================
     const APP_WEB_URL = "https://script.google.com/macros/s/AKfycbwmrqg1as6r5nsYUEoMuV8mfOgpRZ_W8W31txq_zJqjC2CX4W3Avg8_nu0lKrs5f_Co/exec"; // gantikan dengan URL APP WEB
     let activeAppWebUrl = APP_WEB_URL;
-    // Simpan URL deployment agar tidak perlu memasukkannya setiap kali membuka aplikasi.
+    // Gunakan kunci versi baru agar URL deployment lama yang mungkin tersimpan tidak terus dipakai.
+    const WEB_APP_URL_STORAGE_KEY = 'MPI_PANCASILA_APP_WEB_URL_V2';
     try {
-      const savedEndpoint = localStorage.getItem('MPI_PANCASILA_APP_WEB_URL');
+      const savedEndpoint = localStorage.getItem(WEB_APP_URL_STORAGE_KEY);
       if (savedEndpoint && (!activeAppWebUrl || activeAppWebUrl.includes('GANTIKAN DENGAN URL'))) activeAppWebUrl = savedEndpoint;
     } catch (storageError) { /* Penyimpanan lokal mungkin dibatasi browser; input URL tetap dapat digunakan. */ }
     let quizSubmitted = false;
@@ -377,26 +378,30 @@
     function getWebAppUrl(){
       let endpoint=String(activeAppWebUrl||'').trim();
       if(!endpoint||endpoint.includes('GANTIKAN DENGAN URL')){
-        endpoint=(prompt('Masukkan URL deployment Google Apps Script Web App (biasanya berakhiran /exec):','')||'').trim();
+        endpoint=(prompt('Masukkan URL deployment Google Apps Script Web App yang sudah diuji. Gunakan URL utama yang berakhiran /exec, bukan URL dengan ?testwrite=1 atau ?health=1:','')||'').trim();
       }
       if(!endpoint) return '';
       try{
         const parsed=new URL(endpoint);
-        if(parsed.protocol!=='https:'||parsed.hostname!=='script.google.com'||!/^\/macros\/s\/[^/]+\/(exec|dev)\/?$/.test(parsed.pathname)){
-          throw new Error('URL harus berupa URL Web App Google Apps Script, misalnya https://script.google.com/macros/s/DEPLOYMENT_ID/exec.');
+        if(parsed.protocol!=='https:'||parsed.hostname!=='script.google.com'||!/^\/macros\/s\/[^/]+\/exec\/?$/.test(parsed.pathname)){
+          throw new Error('URL harus berupa URL Web App Google Apps Script yang berakhiran /exec, misalnya https://script.google.com/macros/s/DEPLOYMENT_ID/exec. Jangan gunakan /dev, ?testwrite=1, atau ?health=1.');
         }
+        // Hapus query/hash pengujian jika disertakan; aplikasi harus POST ke endpoint utama /exec.
+        parsed.search='';
+        parsed.hash='';
+        endpoint=parsed.origin+parsed.pathname;
       }catch(err){throw new Error(err.message==='Invalid URL'?'URL tidak valid. Masukkan URL Web App Google Apps Script yang berakhiran /exec.':err.message);}
       activeAppWebUrl=endpoint;
-      try { localStorage.setItem('MPI_PANCASILA_APP_WEB_URL', endpoint); } catch (storageError) { /* Abaikan jika penyimpanan lokal tidak tersedia. */ }
+      try { localStorage.setItem(WEB_APP_URL_STORAGE_KEY, endpoint); } catch (storageError) { /* Abaikan jika penyimpanan lokal tidak tersedia. */ }
       return endpoint;
     }
-    function submitPayloadThroughForm(endpoint, payload){
-      // Submit using a normal HTML form so the server response is visible.
-      // The new tab shows the actual Apps Script status: success or error.
+    function submitPayloadThroughForm(endpoint, payload, targetName){
+      // POST melalui form HTML biasa agar Apps Script menerima e.parameter.payload.
+      // Target sudah dibuka secara sinkron dari klik tombol supaya tidak diblokir popup blocker.
       const form=document.createElement('form');
       form.method='POST';
       form.action=endpoint;
-      form.target='_blank';
+      form.target=targetName || '_self';
       form.enctype='application/x-www-form-urlencoded';
       form.acceptCharset='UTF-8';
       form.style.display='none';
@@ -407,9 +412,8 @@
       form.appendChild(field);
       document.body.appendChild(form);
       try{
-        form.submit();
-        // Retain the form briefly to avoid browsers cancelling the submission.
-        window.setTimeout(()=>form.remove(),5000);
+        HTMLFormElement.prototype.submit.call(form);
+        window.setTimeout(()=>form.remove(),10000);
         return true;
       }catch(err){
         form.remove();
@@ -426,6 +430,23 @@
       if(!name||!kelas||!tanggal){status.textContent='Lengkapi nama, kelas, dan tanggal terlebih dahulu.';status.className='text-sm mt-3 font-bold text-rose-700';return;}
       if(Object.keys(answers).length!==questions.length){status.textContent='Jawab semua 10 soal sebelum mengirim jawaban.';status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
 
+      // Siapkan tab respons sebelum prompt URL berjalan agar browser tidak memblokir POST.
+      // Jika popup diblokir, fallback ke tab aplikasi saat ini sehingga respons server tetap terlihat.
+      const resultTargetName='mpiHasilAsesmen_'+Date.now();
+      let resultWindow=null;
+      let resultTarget='_self';
+      try{
+        resultWindow=window.open('about:blank',resultTargetName);
+        if(resultWindow){
+          resultTarget=resultTargetName;
+          try{
+            resultWindow.document.open();
+            resultWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Mengirim hasil asesmen</title></head><body style="font-family:system-ui,sans-serif;padding:32px;color:#1e3a8a"><h2>Mengirim hasil asesmen…</h2><p>Halaman ini akan menampilkan respons Google Apps Script. Tunggu hingga status success atau error muncul.</p></body></html>');
+            resultWindow.document.close();
+          }catch(windowWriteError){}
+        }
+      }catch(popupError){}
+
       // Nilai hanya tampil setelah siswa menekan tombol kirim.
       quizSubmitted=true;
       setQuizLocked(true);
@@ -438,13 +459,15 @@
       try{
         endpoint=getWebAppUrl();
       }catch(err){
+        if(resultWindow && !resultWindow.closed) resultWindow.close();
         status.textContent=`Nilai sudah dihitung, tetapi belum dikirim. ${err.message}`;
         status.className='text-sm mt-3 font-bold text-rose-700';
         btn.disabled=false;
         return;
       }
       if(!endpoint){
-        status.textContent='Nilai sudah dihitung, tetapi belum dikirim. Tekan Kirim nilai dan masukkan URL Web App Google Apps Script yang berakhiran /exec.';
+        if(resultWindow && !resultWindow.closed) resultWindow.close();
+        status.textContent='Nilai sudah dihitung, tetapi belum dikirim. Masukkan URL Web App Google Apps Script yang berakhiran /exec.';
         status.className='text-sm mt-3 font-bold text-amber-700';
         btn.disabled=false;
         return;
@@ -455,15 +478,19 @@
       status.textContent='Mengirim formulir hasil asesmen ke Google Apps Script…';
       status.className='text-sm mt-3 font-semibold text-blue-700';
       try{
-        submitPayloadThroughForm(endpoint,payload);
+        submitPayloadThroughForm(endpoint,payload,resultTarget);
         sendDispatched=true;
         const healthUrl=endpoint+(endpoint.includes('?')?'&':'?')+'health=1';
         const testWriteUrl=endpoint+(endpoint.includes('?')?'&':'?')+'testwrite=1';
-        status.innerHTML='Permintaan dikirim ke Web App dan respons server dibuka di tab baru. Pastikan tab tersebut menampilkan <code>"status":"success"</code> agar pengiriman terkonfirmasi. Jika menampilkan <code>"status":"error"</code>, gunakan pesan error di tab tersebut untuk mengetahui penyebabnya. <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">Uji penulisan ke sheet</a> · <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">Periksa koneksi</a>.';
+        status.innerHTML=(resultTarget==='_self'
+          ? 'Browser memblokir tab baru, jadi respons server akan ditampilkan pada halaman ini. Pastikan respons memuat <code>"status":"success"</code>. '
+          : 'Permintaan dikirim. Lihat tab respons yang baru dibuka dan pastikan respons memuat <code>"status":"success"</code>. ')
+          +'Jika muncul <code>"status":"error"</code>, gunakan pesan error pada respons tersebut. <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">Uji penulisan ke sheet</a> · <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">Periksa koneksi</a>.';
         status.className='text-sm mt-3 font-bold text-blue-700';
         btn.disabled=false;
         btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim ulang nilai';
       }catch(err){
+        if(resultWindow && !resultWindow.closed) resultWindow.close();
         status.textContent=`Pengiriman gagal dimulai: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba lagi.`;
         status.className='text-sm mt-3 font-bold text-rose-700';
         btn.disabled=false;
