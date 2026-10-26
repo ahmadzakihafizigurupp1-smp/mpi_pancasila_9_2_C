@@ -244,8 +244,13 @@
     // GANTIKAN URL DI BAWAH DENGAN URL WEB APP GOOGLE APPS SCRIPT.
     // Gunakan Find (Ctrl+F): "gantikan dengan URL APP WEB"
     // ============================================================
-    const APP_WEB_URL = "https://script.google.com/macros/s/AKfycbzSRjv29An7yGwkbblqL_bnSsqA6k1L0LW_vdMyCM7u1vDhzJE4JBOXESWzwzj4xxHy/exec"; // gantikan dengan URL APP WEB
+    const APP_WEB_URL = "https://script.google.com/macros/s/AKfycbwmrqg1as6r5nsYUEoMuV8mfOgpRZ_W8W31txq_zJqjC2CX4W3Avg8_nu0lKrs5f_Co/exec"; // gantikan dengan URL APP WEB
     let activeAppWebUrl = APP_WEB_URL;
+    // Simpan URL deployment agar tidak perlu memasukkannya setiap kali membuka aplikasi.
+    try {
+      const savedEndpoint = localStorage.getItem('MPI_PANCASILA_APP_WEB_URL');
+      if (savedEndpoint && (!activeAppWebUrl || activeAppWebUrl.includes('GANTIKAN DENGAN URL'))) activeAppWebUrl = savedEndpoint;
+    } catch (storageError) { /* Penyimpanan lokal mungkin dibatasi browser; input URL tetap dapat digunakan. */ }
     let quizSubmitted = false;
     let sendDispatched = false;
 
@@ -382,6 +387,7 @@
         }
       }catch(err){throw new Error(err.message==='Invalid URL'?'URL tidak valid. Masukkan URL Web App Google Apps Script yang berakhiran /exec.':err.message);}
       activeAppWebUrl=endpoint;
+      try { localStorage.setItem('MPI_PANCASILA_APP_WEB_URL', endpoint); } catch (storageError) { /* Abaikan jika penyimpanan lokal tidak tersedia. */ }
       return endpoint;
     }
     async function submitScore(){
@@ -428,11 +434,14 @@
         // text/plain + no-cors mengirim simple request ke Apps Script tanpa preflight CORS.
         await fetch(endpoint,{method:'POST',mode:'no-cors',redirect:'follow',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify(payload),keepalive:true});
         sendDispatched=true;
-        status.textContent='Permintaan pengiriman telah dikirim. Browser tidak dapat membaca konfirmasi dari mode no-cors; periksa Google Sheets untuk memastikan baris masuk.';
-        status.className='text-sm mt-3 font-bold text-emerald-700';
-        btn.innerHTML='<i class="fa-solid fa-check"></i> Permintaan terkirim';
+        // no-cors tidak memungkinkan browser memastikan apakah doPost berhasil menulis ke Spreadsheet.
+        // Tampilkan status yang jujur dan sediakan tautan diagnostik endpoint.
+        const healthUrl = endpoint + (endpoint.includes('?') ? '&' : '?') + 'health=1';
+        status.innerHTML='Permintaan sudah dikirim, tetapi browser tidak dapat mengonfirmasi penyimpanan. Periksa Google Sheets. Bila baris tidak muncul, <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">uji koneksi Web App dan Spreadsheet</a>.';
+        status.className='text-sm mt-3 font-bold text-amber-700';
+        btn.innerHTML='<i class="fa-solid fa-check"></i> Permintaan dikirim';
       }catch(err){
-        status.textContent=`Nilai akhir tetap ditampilkan, tetapi pengiriman gagal: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba kirim kembali.`;
+        status.textContent=`Nilai akhir tetap ditampilkan, tetapi permintaan gagal dikirim: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba kirim kembali.`;
         status.className='text-sm mt-3 font-bold text-rose-700';
         btn.disabled=false;
         btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Coba kirim lagi';
