@@ -214,7 +214,7 @@
       </div>
       <div class="panel p-5 sm:p-6 mb-5"><h2 class="font-extrabold text-blue-950"><i class="fa-solid fa-user-pen text-blue-600 mr-2"></i>Identitas peserta</h2><div class="grid sm:grid-cols-3 gap-3 mt-4"><div><label for="studentName" class="text-xs font-bold text-slate-600">Nama lengkap</label><input id="studentName" class="field mt-1" maxlength="100" placeholder="Nama siswa" required /></div><div><label for="studentClass" class="text-xs font-bold text-slate-600">Kelas</label><input id="studentClass" class="field mt-1" maxlength="30" placeholder="IX A / IX B" required /></div><div><label for="assessmentDate" class="text-xs font-bold text-slate-600">Tanggal</label><input id="assessmentDate" class="field mt-1" type="date" required /></div></div></div>
       <form id="quizForm" class="space-y-4" onsubmit="return false;"><div id="questionsContainer" class="space-y-4"></div></form>
-      <div class="panel p-5 mt-5"><div class="flex flex-wrap gap-3 items-center justify-between"><div><h2 class="font-extrabold text-blue-950">Selesai mengerjakan?</h2><p class="text-sm text-slate-500 mt-1">Pastikan seluruh soal telah dijawab untuk mengirim hasil ke Google Sheets.</p></div><div class="flex flex-wrap gap-2"><button class="btn secondary" onclick="resetQuiz()" type="button"><i class="fa-solid fa-rotate-left"></i> Reset jawaban</button><button id="submitScoreBtn" class="btn success" onclick="submitScore()" type="button"><i class="fa-solid fa-cloud-arrow-up"></i> Kirim nilai</button></div></div><p id="submitStatus" class="text-sm mt-3 font-semibold" aria-live="polite"></p><p class="source-note mt-2">Pengiriman nilai memerlukan URL Web App Google Apps Script pada konstanta APP_WEB_URL di kode HTML. Mode no-cors tidak memberikan konfirmasi isi respons; setelah mengirim, guru perlu memeriksa Google Sheets.</p></div>
+      <div class="panel p-5 mt-5"><div class="flex flex-wrap gap-3 items-center justify-between"><div><h2 class="font-extrabold text-blue-950">Selesai mengerjakan?</h2><p class="text-sm text-slate-500 mt-1">Pastikan seluruh soal telah dijawab untuk mengirim hasil ke Google Sheets.</p></div><div class="flex flex-wrap gap-2"><button class="btn secondary" onclick="resetQuiz()" type="button"><i class="fa-solid fa-rotate-left"></i> Reset jawaban</button><button id="submitScoreBtn" class="btn success" onclick="submitScore()" type="button"><i class="fa-solid fa-cloud-arrow-up"></i> Kirim nilai</button></div></div><p id="submitStatus" class="text-sm mt-3 font-semibold" aria-live="polite"></p><p class="source-note mt-2">Pengiriman nilai memerlukan URL Web App Google Apps Script. Setelah mengirim, periksa Google Sheets untuk memastikan baris asesmen tercatat.</p></div>
       <div class="mt-5 flex justify-between"><button class="btn secondary" onclick="goTab(4)"><i class="fa-solid fa-arrow-left"></i> Flashcard</button><button class="btn" onclick="goTab(6)">Kesimpulan & Refleksi <i class="fa-solid fa-arrow-right"></i></button></div>
     </section>
 
@@ -390,21 +390,50 @@
       try { localStorage.setItem('MPI_PANCASILA_APP_WEB_URL', endpoint); } catch (storageError) { /* Abaikan jika penyimpanan lokal tidak tersedia. */ }
       return endpoint;
     }
+    function submitPayloadThroughForm(endpoint, payload){
+      // Native HTML form POST does not require CORS permissions like fetch does.
+      // The form targets a hidden iframe so the learning app stays on this page.
+      const frameName='mpiPancasilaSubmitFrame';
+      let frame=document.getElementById(frameName);
+      if(!frame){
+        frame=document.createElement('iframe');
+        frame.id=frameName;
+        frame.name=frameName;
+        frame.title='Pengiriman hasil asesmen';
+        frame.setAttribute('aria-hidden','true');
+        frame.style.cssText='position:absolute;width:1px;height:1px;left:-9999px;border:0;';
+        document.body.appendChild(frame);
+      }
+      const form=document.createElement('form');
+      form.method='POST';
+      form.action=endpoint;
+      form.target=frameName;
+      form.enctype='application/x-www-form-urlencoded';
+      form.acceptCharset='UTF-8';
+      form.style.display='none';
+      const field=document.createElement('input');
+      field.type='hidden';
+      field.name='payload';
+      field.value=JSON.stringify(payload);
+      form.appendChild(field);
+      document.body.appendChild(form);
+      try{
+        form.submit();
+      }finally{
+        form.remove();
+      }
+    }
+
     async function submitScore(){
       const status=document.getElementById('submitStatus');
       const btn=document.getElementById('submitScoreBtn');
-      if(sendDispatched){
-        status.textContent='Permintaan pengiriman sudah dikirim. Periksa Google Sheets untuk memastikan data tercatat.';
-        status.className='text-sm mt-3 font-bold text-emerald-700';
-        return;
-      }
       const name=document.getElementById('studentName').value.trim();
       const kelas=document.getElementById('studentClass').value.trim();
       const tanggal=document.getElementById('assessmentDate').value;
       if(!name||!kelas||!tanggal){status.textContent='Lengkapi nama, kelas, dan tanggal terlebih dahulu.';status.className='text-sm mt-3 font-bold text-rose-700';return;}
       if(Object.keys(answers).length!==questions.length){status.textContent='Jawab semua 10 soal sebelum mengirim jawaban.';status.className='text-sm mt-3 font-bold text-rose-700';const missing=questions.findIndex((q,i)=>answers[i]===undefined);if(missing>=0)document.getElementById(`question-${missing}`).scrollIntoView({behavior:'smooth',block:'center'});return;}
 
-      // Baru setelah tombol kirim ditekan dan formulir lengkap, tampilkan nilai akhir.
+      // Nilai hanya tampil setelah siswa menekan tombol kirim.
       quizSubmitted=true;
       setQuizLocked(true);
       updateScore();
@@ -416,32 +445,33 @@
       try{
         endpoint=getWebAppUrl();
       }catch(err){
-        status.textContent=`Nilai akhir sudah dihitung, tetapi belum dikirim. ${err.message}`;
+        status.textContent=`Nilai sudah dihitung, tetapi belum dikirim. ${err.message}`;
         status.className='text-sm mt-3 font-bold text-rose-700';
+        btn.disabled=false;
         return;
       }
       if(!endpoint){
-        status.textContent='Nilai akhir sudah dihitung, tetapi belum tersimpan. Klik Kirim nilai lagi lalu masukkan URL Web App Google Apps Script.';
+        status.textContent='Nilai sudah dihitung, tetapi belum dikirim. Tekan Kirim nilai dan masukkan URL Web App Google Apps Script yang berakhiran /exec.';
         status.className='text-sm mt-3 font-bold text-amber-700';
+        btn.disabled=false;
         return;
       }
 
       btn.disabled=true;
       btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Mengirim…';
-      status.textContent='Mengirim hasil asesmen ke Google Sheets…';
+      status.textContent='Mengirim formulir hasil asesmen ke Google Apps Script…';
       status.className='text-sm mt-3 font-semibold text-blue-700';
       try{
-        // text/plain + no-cors mengirim simple request ke Apps Script tanpa preflight CORS.
-        await fetch(endpoint,{method:'POST',mode:'no-cors',redirect:'follow',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify(payload),keepalive:true});
+        submitPayloadThroughForm(endpoint,payload);
         sendDispatched=true;
-        // no-cors tidak memungkinkan browser memastikan apakah doPost berhasil menulis ke Spreadsheet.
-        // Tampilkan status yang jujur dan sediakan tautan diagnostik endpoint.
-        const healthUrl = endpoint + (endpoint.includes('?') ? '&' : '?') + 'health=1';
-        status.innerHTML='Permintaan sudah dikirim, tetapi browser tidak dapat mengonfirmasi penyimpanan. Periksa Google Sheets. Bila baris tidak muncul, <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">uji koneksi Web App dan Spreadsheet</a>.';
+        const healthUrl=endpoint+(endpoint.includes('?')?'&':'?')+'health=1';
+        const testWriteUrl=endpoint+(endpoint.includes('?')?'&':'?')+'testwrite=1';
+        status.innerHTML='Formulir pengiriman sudah dikirim ke Web App. Browser tidak dapat membaca hasil dari iframe lintas situs, jadi pastikan baris muncul di Google Sheets. Jika belum muncul, <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">uji penulisan ke sheet</a> atau <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">periksa koneksi</a>. Jika mengirim ulang, mungkin muncul baris duplikat.';
         status.className='text-sm mt-3 font-bold text-amber-700';
-        btn.innerHTML='<i class="fa-solid fa-check"></i> Permintaan dikirim';
+        btn.disabled=false;
+        btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim ulang nilai';
       }catch(err){
-        status.textContent=`Nilai akhir tetap ditampilkan, tetapi permintaan gagal dikirim: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba kirim kembali.`;
+        status.textContent=`Pengiriman gagal dimulai: ${err.message}. Periksa URL deployment dan koneksi internet, lalu coba lagi.`;
         status.className='text-sm mt-3 font-bold text-rose-700';
         btn.disabled=false;
         btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Coba kirim lagi';
