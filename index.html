@@ -244,7 +244,7 @@
     // GANTIKAN URL DI BAWAH DENGAN URL WEB APP GOOGLE APPS SCRIPT.
     // Gunakan Find (Ctrl+F): "gantikan dengan URL APP WEB"
     // ============================================================
-    const APP_WEB_URL = 'https://script.google.com/macros/s/AKfycbwmrqg1as6r5nsYUEoMuV8mfOgpRZ_W8W31txq_zJqjC2CX4W3Avg8_nu0lKrs5f_Co/exec'; // gantikan dengan URL APP WEB
+    const APP_WEB_URL = "https://script.google.com/macros/s/AKfycbwmrqg1as6r5nsYUEoMuV8mfOgpRZ_W8W31txq_zJqjC2CX4W3Avg8_nu0lKrs5f_Co/exec"; // gantikan dengan URL APP WEB
     let activeAppWebUrl = APP_WEB_URL;
     // Simpan URL deployment agar tidak perlu memasukkannya setiap kali membuka aplikasi.
     try {
@@ -391,23 +391,12 @@
       return endpoint;
     }
     function submitPayloadThroughForm(endpoint, payload){
-      // Native HTML form POST does not require CORS permissions like fetch does.
-      // The form targets a hidden iframe so the learning app stays on this page.
-      const frameName='mpiPancasilaSubmitFrame';
-      let frame=document.getElementById(frameName);
-      if(!frame){
-        frame=document.createElement('iframe');
-        frame.id=frameName;
-        frame.name=frameName;
-        frame.title='Pengiriman hasil asesmen';
-        frame.setAttribute('aria-hidden','true');
-        frame.style.cssText='position:absolute;width:1px;height:1px;left:-9999px;border:0;';
-        document.body.appendChild(frame);
-      }
+      // Submit using a normal HTML form so the server response is visible.
+      // The new tab shows the actual Apps Script status: success or error.
       const form=document.createElement('form');
       form.method='POST';
       form.action=endpoint;
-      form.target=frameName;
+      form.target='_blank';
       form.enctype='application/x-www-form-urlencoded';
       form.acceptCharset='UTF-8';
       form.style.display='none';
@@ -419,8 +408,12 @@
       document.body.appendChild(form);
       try{
         form.submit();
-      }finally{
+        // Retain the form briefly to avoid browsers cancelling the submission.
+        window.setTimeout(()=>form.remove(),5000);
+        return true;
+      }catch(err){
         form.remove();
+        throw err;
       }
     }
 
@@ -466,8 +459,8 @@
         sendDispatched=true;
         const healthUrl=endpoint+(endpoint.includes('?')?'&':'?')+'health=1';
         const testWriteUrl=endpoint+(endpoint.includes('?')?'&':'?')+'testwrite=1';
-        status.innerHTML='Formulir pengiriman sudah dikirim ke Web App. Browser tidak dapat membaca hasil dari iframe lintas situs, jadi pastikan baris muncul di Google Sheets. Jika belum muncul, <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">uji penulisan ke sheet</a> atau <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">periksa koneksi</a>. Jika mengirim ulang, mungkin muncul baris duplikat.';
-        status.className='text-sm mt-3 font-bold text-amber-700';
+        status.innerHTML='Permintaan dikirim ke Web App dan respons server dibuka di tab baru. Pastikan tab tersebut menampilkan <code>"status":"success"</code> agar pengiriman terkonfirmasi. Jika menampilkan <code>"status":"error"</code>, gunakan pesan error di tab tersebut untuk mengetahui penyebabnya. <a class="underline font-extrabold" href="'+testWriteUrl+'" target="_blank" rel="noopener">Uji penulisan ke sheet</a> · <a class="underline font-extrabold" href="'+healthUrl+'" target="_blank" rel="noopener">Periksa koneksi</a>.';
+        status.className='text-sm mt-3 font-bold text-blue-700';
         btn.disabled=false;
         btn.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> Kirim ulang nilai';
       }catch(err){
